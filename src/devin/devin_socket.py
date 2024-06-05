@@ -30,13 +30,18 @@ class DevinSocket:
 
     def is_connected(self):
         return self.__socket is not None and self.__is_socket_connected
-
-    def send(self, message):
+    
+    def initialize(self):
         if self.__socket is None:
             self.__try_initialize()
+
+    def send(self, message):
+        self.initialize()
         
         if self.is_connected() and self.__socket is not None:
-            self.__socket.send(json.dumps(message))
+            msg = json.dumps(message)
+            print(f'Sending message to agent {msg}')
+            self.__socket.send(msg)
 
     def __try_initialize(self):
         if self.__initializing:
@@ -85,9 +90,9 @@ class DevinSocket:
             
     def __on_open(self, ws):
         print("Socket connected")
-        self.__is_socket_connected = True
         for callback in self.callbacks["connect"]:
             callback(self)
+        self.__is_socket_connected = True
             
     def __on_message(self, ws, message):
         for callback in self.callbacks["receive"]:
@@ -95,6 +100,6 @@ class DevinSocket:
             
     def __on_close(self, ws, status, message):
         print("Socket closed", status, message)
-        self.__is_socket_connected = False
         for callback in self.callbacks["disconnect"]:
             callback(self)
+        self.__is_socket_connected = False

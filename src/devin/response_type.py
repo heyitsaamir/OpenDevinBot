@@ -26,8 +26,7 @@ class ObservationMessage:
 
 DevinSocketMessage = Union[ActionMessage, ObservationMessage]
 
-def buildSocketMessage(jsonStr: str) -> DevinSocketMessage:
-    jsonObj = json.loads(jsonStr)
+def buildSocketMessageFromDict(jsonObj: Dict[str, Any]) -> DevinSocketMessage:
     if 'action' in jsonObj:
         action = jsonObj.get('action')
         assert action is not None
@@ -45,3 +44,7 @@ def buildSocketMessage(jsonStr: str) -> DevinSocketMessage:
             extras=jsonObj.get('extras'),
             message=jsonObj.get('message')
         )
+
+def buildSocketMessage(jsonStr: str) -> DevinSocketMessage:
+    jsonObj = json.loads(jsonStr)
+    return buildSocketMessageFromDict(jsonObj)

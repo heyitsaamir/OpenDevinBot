@@ -19,6 +19,8 @@ from .action_type import ActionType
 from .observation_type import ObservationType
 from .commands import send_message, initialize_agent, clear_messages, start_message, stop_task
 from .response_type import buildSocketMessage, DevinSocketMessage, ActionMessage, ObservationMessage
+from .devin_auth import TokenStorage
+from .devin_api import DevinAPI
 
 import asyncio
 
@@ -30,7 +32,7 @@ def call_async(coro):
     else:
         return loop.run_until_complete(coro)
 
-TERMINAL_STATES = [AgentState.INIT.value, AgentState.FINISHED.value, AgentState.STOPPED.value, AgentState.ERROR.value]
+TERMINAL_STATES = [AgentState.INIT.value, AgentState.STOPPED.value, AgentState.ERROR.value, AgentState.FINISHED.value]
     
 class DevinConversationHandler:
     def __init__(self, 
@@ -39,10 +41,15 @@ class DevinConversationHandler:
                  agent_state: Optional[AgentState],
                  app_id: str) -> None:
         self.__context = context
-        self.__socket = DevinSocket(context.activity.from_property.aad_object_id) # type: ignore
+        self.__user_id = context.activity.from_property.aad_object_id # type: ignore
+        self.__socket = DevinSocket(self.__user_id)
         self.__conversation_reference = conversation_reference
-        self.__agent_state = agent_state
+        self.__agent_state = agent_state or AgentState.INIT.value
         self.__app_id = app_id
+        self.__socket.register_callback("receive", lambda _, event: self.__on_handle_assistant_message(event))
+        self.__socket.register_callback("disconnect", lambda _, event: self.__on_close_socket(event))
+        self.__socket.register_callback("connect", lambda _: self.__on_connect())
+        self.__socket.initialize()
     
     async def handle_message(self, context: TurnContext, message: str):
         if (is_agent_state_command(message)):
@@ -61,31 +68,30 @@ class DevinConversationHandler:
     
     async def _handle_command(self, context: TurnContext, command: str):
         print(f"Got task command {command}")
-        if (self.__is_running() and command == AgentState.STOPPED.value):
+        if (command == AgentState.STOPPED.value):
             self.__socket.send(stop_task())
             await context.send_activity("Task stopped.")
         else:
             await self.__context.send_activity("There is no task running. Please start a task first.")
             
     async def _handle_new_task(self, message: str):
-        self.__socket.unregister_all_callbacks()
-        self.__socket.register_callback("receive", lambda _, event: self._on_handle_assistant_message(event))
-        self.__socket.register_callback("disconnect", lambda _, event: self._on_close_socket(event))
         self.__original_message = message
         self.__socket.send(initialize_agent())
     
-    def _on_handle_assistant_message(self, event):
+    def __on_handle_assistant_message(self, event):
         assert isinstance(event, str)
         socket_message = buildSocketMessage(event)
         if isinstance(socket_message, ObservationMessage) and socket_message.observation == ObservationType.AGENT_STATE_CHANGED.value:
             self._handle_assistant_state_changed(socket_message)
             
-        if not self.__is_running():
+        if self.__is_running() or (isinstance(socket_message, ActionMessage) and socket_message.action == ActionType.FINISH.value):
             self._handle_assistant_message(socket_message)
         
     def _handle_assistant_state_changed(self, socket_message: ObservationMessage):
         if socket_message.extras is not None and socket_message.extras.get('agent_state') is not None:
             # keep track of the agent_state
+            if self.__agent_state != socket_message.extras.get('agent_state'):
+                print(f"Agent state changed to {socket_message.extras.get('agent_state')}")
             self.__agent_state = socket_message.extras.get('agent_state')
             
             if self.__agent_state == AgentState.INIT.value:
@@ -105,22 +111,33 @@ class DevinConversationHandler:
             wait_for_response = socket_message.args.get('wait_for_response')
             message = socket_message.message
             thought = socket_message.args.get('thought')
-            if socket_message.action == ActionType.INIT.value:
-                return
-            elif socket_message.action == ActionType.MESSAGE.value and args_content is not None:
-                message_to_send = build_adaptive_card(args_content, "QuestionCircle" if wait_for_response else "Lightbulb")
-            elif socket_message.action == ActionType.FINISH.value:
-                message_to_send = build_adaptive_card(message, "CheckboxChecked")
-            elif socket_message.action == ActionType.CHANGE_AGENT_STATE.value:
-                pass
-            elif thought:
-                message_to_send = build_adaptive_card(thought, "Glasses")
+            match socket_message.action:
+                case ActionType.INIT.value:
+                    pass
+                case ActionType.MESSAGE.value:
+                    if args_content is not None:
+                        message_to_send = build_adaptive_card(args_content, "QuestionCircle" if wait_for_response else "Lightbulb")
+                case ActionType.FINISH.value:
+                    message_to_send = build_adaptive_card(message, "CheckboxChecked")
+                case ActionType.CHANGE_AGENT_STATE.value:
+                    pass
+                case _:
+                    if thought:
+                        message_to_send = build_adaptive_card(thought, "Glasses")
         elif isinstance(socket_message, ObservationMessage) and socket_message.message is not None and socket_message.message != '':
             message = socket_message.message
-            if socket_message.observation == ObservationType.WRITE.value:
-                message_to_send = build_adaptive_card(message, "Folder")
-            else:
-                message_to_send = build_adaptive_card(message, "Glasses")
+            match socket_message.observation:
+                case ObservationType.RUN.value:
+                    pass
+                case ObservationType.AGENT_STATE_CHANGED.value:
+                    pass
+                case ObservationType.BROWSE.value:
+                    pass
+                case ObservationType.WRITE.value:
+                    message_to_send = build_adaptive_card(message, "Folder")
+                case _:
+                    if message:
+                        message_to_send = build_adaptive_card(message, "Glasses")
 
         if message_to_send:
             call_async(self.__context.adapter.continue_conversation(
@@ -129,11 +146,18 @@ class DevinConversationHandler:
                 self.__app_id,
             ))
     
-    def _on_close_socket(self, event):
+    def __on_close_socket(self, event):
         print("Socket closed for agent")
         
+    def __on_connect(self):
+        token = TokenStorage().get_token(self.__user_id)
+        messages = DevinAPI.fetch_messages(token)
+        for message in messages:
+            if isinstance(message, ObservationMessage) and message.observation == ObservationType.AGENT_STATE_CHANGED.value:
+                self._handle_assistant_state_changed(message)
+        
     def __is_running(self):
-        return self.__agent_state not in TERMINAL_STATES
+        return self.__agent_state not in TERMINAL_STATES and self.__agent_state is not None
 
 def build_adaptive_card(msg: str, icon: str, is_important: Optional[bool] = None, url: Optional[str] = None) -> Activity:
     body: List[Dict[str, Any]] = [

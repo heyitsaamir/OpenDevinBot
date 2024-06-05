@@ -11,69 +11,11 @@ class DevinSocket:
             "receive": [],
             "disconnect": [],
         }
-        self._initializing = False
-        self._token = None
-        self._socket = None
-        self.is_socket_connected = False
-        self._token_storage = TokenStorage()
-
-    def _try_initialize(self):
-        if self._initializing:
-            print("Already initializing...")
-            return
-        self._initializing = True
-        try:
-            self._token = self._token_storage.get_token(self.user_id)
-            self._initialize(self._token)
-            
-            print('Connected!')
-        except Exception as e:
-            print(f"Connection failed for {self.user_id}. Retry... {str(e)}")
-            print(e)
-            self._try_initialize()
-        finally:
-            self._initializing = False
-
-    def _initialize(self, token: str):
-        params = {
-            "token": token,
-        }
-
-        if self.user_id:
-            params["uid"] = self.user_id
-
-        if self._socket:
-            self._socket.close()
-
-        ws_url = f"ws://localhost:3001/ws?{urlencode(params)}"
-        self.is_socket_connected = False
-        self._socket = websocket.WebSocketApp(
-            ws_url, 
-            on_open=self._on_open, 
-            on_message=self._on_message, 
-            on_close=self._on_close, 
-            on_error=lambda _, e: print(f"Websocket error: {e}"))
-        threading.Thread(target=self._socket.run_forever).start()
-        
-        while not self.is_socket_connected:
-            time.sleep(0.1)
-        print("Connected socket")
-            
-    def _on_open(self, ws):
-        print("Socket connected")
-        self.is_socket_connected = True
-        for callback in self.callbacks["connect"]:
-            callback(self)
-            
-    def _on_message(self, ws, message):
-        for callback in self.callbacks["receive"]:
-            callback(self, message)
-            
-    def _on_close(self, ws, status, message):
-        print("Socket closed", status, message)
-        self.is_socket_connected = False
-        for callback in self.callbacks["disconnect"]:
-            callback(self)
+        self.__initializing = False
+        self.__token = None
+        self.__socket = None
+        self.__is_socket_connected = False
+        self.__token_storage = TokenStorage()
 
     def register_callback(self, event, callback):
         self.callbacks[event].append(callback)
@@ -87,11 +29,72 @@ class DevinSocket:
         }
 
     def is_connected(self):
-        return self._socket is not None and self.is_socket_connected
+        return self.__socket is not None and self.__is_socket_connected
 
     def send(self, message):
-        if self._socket is None:
-            self._try_initialize()
+        if self.__socket is None:
+            self.__try_initialize()
         
-        if self.is_connected() and self._socket is not None:
-            self._socket.send(json.dumps(message))
+        if self.is_connected() and self.__socket is not None:
+            self.__socket.send(json.dumps(message))
+
+    def __try_initialize(self):
+        if self.__initializing:
+            print("Already initializing...")
+            return
+        self.__initializing = True
+        try:
+            self.__token = self.__token_storage.get_token(self.user_id)
+            self.__initialize(self.__token)
+            
+            print('Connected!')
+        except Exception as e:
+            print(f"Connection failed for {self.user_id}. Retry... {str(e)}")
+            print(e)
+            self.__try_initialize()
+        finally:
+            self.__initializing = False
+
+    def __initialize(self, token: str):
+        params = {
+            "token": token,
+        }
+
+        if self.user_id:
+            params["uid"] = self.user_id
+
+        if self.__socket:
+            self.__socket.close()
+
+        ws_url = f"ws://localhost:3001/ws?{urlencode(params)}"
+        self.__is_socket_connected = False
+        self.__socket = websocket.WebSocketApp(
+            ws_url, 
+            on_open=self.__on_open, 
+            on_message=self.__on_message, 
+            on_close=self.__on_close, 
+            on_error=lambda _, e: print(f"Websocket error: {e}"))
+        threading.Thread(target=self.__socket.run_forever).start()
+        
+        start_time = time.time()
+        while not self.__is_socket_connected:
+            if time.time() - start_time > 60:  # 60 seconds
+                raise TimeoutError("Connection attempt timed out after 1 minute")
+            time.sleep(0.1)
+        print("Connected socket")
+            
+    def __on_open(self, ws):
+        print("Socket connected")
+        self.__is_socket_connected = True
+        for callback in self.callbacks["connect"]:
+            callback(self)
+            
+    def __on_message(self, ws, message):
+        for callback in self.callbacks["receive"]:
+            callback(self, message)
+            
+    def __on_close(self, ws, status, message):
+        print("Socket closed", status, message)
+        self.__is_socket_connected = False
+        for callback in self.callbacks["disconnect"]:
+            callback(self)

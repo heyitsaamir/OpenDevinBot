@@ -29,6 +29,8 @@ def call_async(coro):
         return asyncio.run(coro)
     else:
         return loop.run_until_complete(coro)
+
+TERMINAL_STATES = [AgentState.INIT.value, AgentState.FINISHED.value, AgentState.STOPPED.value, AgentState.ERROR.value]
     
 class DevinConversationHandler:
     def __init__(self, 
@@ -40,7 +42,6 @@ class DevinConversationHandler:
         self.socket = DevinSocket(context.activity.from_property.aad_object_id) # type: ignore
         self.conversation_reference = conversation_reference
         self.agent_state = agent_state
-        self.is_running = False
         self.app_id = app_id
     
     async def handle_message(self, context: TurnContext, message: str):
@@ -53,14 +54,14 @@ class DevinConversationHandler:
             self.socket.send(send_message(message))
             return
         
-        if (self.is_running):
+        if (self._is_running()):
             await context.send_activity('There is already a task running. Please wait until it finishes. Or use a command to interrupt it')
             return
         await self._handle_new_task(message)
     
     async def _handle_command(self, context: TurnContext, command: str):
         print(f"Got task command {command}")
-        if (self.is_running and command == AgentState.STOPPED.value):
+        if (self._is_running() and command == AgentState.STOPPED.value):
             self.socket.send(stop_task())
             await context.send_activity("Task stopped.")
         else:
@@ -76,11 +77,10 @@ class DevinConversationHandler:
     def _on_handle_assistant_message(self, event):
         assert isinstance(event, str)
         socket_message = buildSocketMessage(event)
-        is_terminal_state = False
         if isinstance(socket_message, ObservationMessage) and socket_message.observation == ObservationType.AGENT_STATE_CHANGED.value:
-            is_terminal_state = self._handle_assistant_state_changed(socket_message)
+            self._handle_assistant_state_changed(socket_message)
             
-        if not is_terminal_state:
+        if not self._is_running():
             self._handle_assistant_message(socket_message)
         
     def _handle_assistant_state_changed(self, socket_message: ObservationMessage):
@@ -93,10 +93,8 @@ class DevinConversationHandler:
                 self.socket.send(clear_messages())
                 print("Sending start message...")
                 self.socket.send(start_message(self.original_message))
-                self.is_running = True
                 return True
             elif self.agent_state == AgentState.FINISHED.value or self.agent_state == AgentState.STOPPED.value:
-                self.is_running = False
                 return True
         return False # indicate that this is not a terminal state
     
@@ -113,7 +111,6 @@ class DevinConversationHandler:
                 message_to_send = build_adaptive_card(args_content, "QuestionCircle" if wait_for_response else "Lightbulb")
             elif socket_message.action == ActionType.FINISH.value:
                 message_to_send = build_adaptive_card(message, "CheckboxChecked")
-                self.is_running = False
             elif socket_message.action == ActionType.CHANGE_AGENT_STATE.value:
                 pass
             elif thought:
@@ -133,8 +130,10 @@ class DevinConversationHandler:
             ))
     
     def _on_close_socket(self, event):
-        # TODO: This might not be the right thing to do here
-        self.is_running = False
+        print("Socket closed for agent")
+        
+    def _is_running(self):
+        return self.agent_state not in TERMINAL_STATES
 
 def build_adaptive_card(msg: str, icon: str, is_important: Optional[bool] = None, url: Optional[str] = None) -> Activity:
     body: List[Dict[str, Any]] = [

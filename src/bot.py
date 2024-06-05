@@ -12,7 +12,7 @@ from botbuilder.core import TurnContext
 from teams import Application, ApplicationOptions, TeamsAdapter
 from teams.state import TurnState
 from typing import Dict
-from devin_types.devin_conversation_handler import DevinConversationHandler
+from devin.devin_conversation_handler import DevinConversationHandler
 
 from config import Config
 

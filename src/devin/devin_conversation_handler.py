@@ -1,11 +1,3 @@
-"""
-Copyright (c) Microsoft Corporation. All rights reserved.
-Licensed under the MIT License.
-
-Description: initialize the app and listen for `message` activitys
-"""
-
-import json
 from botbuilder.core import TurnContext, CardFactory
 from botbuilder.schema import (
     ConversationReference,

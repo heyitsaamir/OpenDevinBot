@@ -11,7 +11,7 @@ This Teams Bot is a simple bot that works with [Open Devin](https://github.com/O
 ---
 
 Open Devin as it is, is an all-encompassing project. It contains the backend and frontend.
-In this project, I tried to integrate the project with Microsoft Teams. It uses a [fork](https://github.com/heyitsaamir/OpenDevin) of Open Devin which contains two major modifications:
+In this project, I tried to integrate the project with Microsoft Teams. It uses a [fork](https://github.com/heyitsaamir/OpenDevin) of Open Devin which contains three major modifications:
 1. It removes the chat-pane from the frontend.
 2. It modifies the backend such that socket messages are broadcasted to multiple frontends.
 3. Enables the ability for the backend to ask the user questions

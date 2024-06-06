@@ -20,3 +20,5 @@ With the above changes, I created this bot ([originally](https://github.com/heyi
 * Uses Microsoft Team's Tabs to display the Open Devin frontend (sans chat-pane).
 * Uses the chat-pane in Teams to send messages to this Bot, which in turn sends the message to the Open Devin backend.
 
+## Demo
+[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/beaO3s35Eq0/0.jpg)](https://www.youtube.com/watch?v=beaO3s35Eq0)
